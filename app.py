@@ -2,7 +2,6 @@ import streamlit as st
 from docx import Document
 from datetime import datetime
 import os
-import comtypes.client
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Pt
 from docx.oxml.ns import qn
