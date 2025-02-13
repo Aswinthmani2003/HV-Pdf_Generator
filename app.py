@@ -9,6 +9,7 @@ from docx.oxml.ns import qn
 from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
 import tempfile
 from num2words import num2words
+import uuid 
 
 # Common Functions
 def apply_formatting(run, font_name, font_size, bold=False):
@@ -56,39 +57,23 @@ def edit_word_template(template_path, output_path, placeholders, font_name, font
     except Exception as e:
         raise Exception(f"Error editing Word template: {e}")
 
-def convert_docx_to_pdf(docx_path, pdf_path):
-    """Convert Word document to PDF using comtypes (Windows only)."""
-    try:
-        comtypes.CoInitialize()
-        word = comtypes.client.CreateObject('Word.Application')
-        doc = word.Documents.Open(os.path.abspath(docx_path))
-        doc.SaveAs(os.path.abspath(pdf_path), FileFormat=17)
-        doc.Close()
-        word.Quit()
-        comtypes.CoUninitialize()
-        return pdf_path
-    except Exception as e:
-        comtypes.CoUninitialize()
-        raise Exception(f"Error converting to PDF: {e}")
 
 # Contract/NDA Generator
-import tempfile
-
 def generate_document(option):
     """Streamlit UI for generating NDA or Contract documents."""
     st.title("Document Generator")
-    
+
     base_dir = os.path.abspath(os.path.dirname(__file__))
     template_paths = {
         "NDA": os.path.join(base_dir, "NDA Template 1.docx"),
         "Contract": os.path.join(base_dir, "Contract Template 1.docx"),
     }
-    
+
     client_name = st.text_input("Enter Client Name:")
     company_name = st.text_input("Enter Company Name:")
     address = st.text_area("Enter Address:")
     date_field = st.date_input("Enter Date:", datetime.today())
-    
+
     placeholders = {
         "<< Client Name >>": client_name,
         "<<Company Name>>": company_name,
@@ -96,23 +81,24 @@ def generate_document(option):
         "<< Date >>": date_field.strftime("%d-%m-%Y"),
         "<< Date (Signature) >>": date_field.strftime("%d-%m-%Y"),
     }
-    
+
     if st.button(f"Generate {option}") or st.session_state.get('buttons_visible', False):
         st.session_state.buttons_visible = True
         formatted_date = date_field.strftime("%d %b %Y")
-        file_name = f"{option} - {client_name} {formatted_date}.docx"
-        pdf_file_name = f"{option} - {client_name} {formatted_date}.pdf"
-        
+
+        # Generate a unique file name using UUID
+        unique_id = str(uuid.uuid4())[:8]  # Shorten UUID for readability
+        file_name = f"{option} - {client_name} {formatted_date} - {unique_id}.docx"
+
         # Use a temporary directory
         temp_dir = tempfile.gettempdir()
         output_path = os.path.join(temp_dir, file_name)
-        pdf_output_path = os.path.join(temp_dir, pdf_file_name)
-        
+
         try:
             font_size = 11 if option == "NDA" else 12
             updated_path = edit_word_template(template_paths[option], output_path, placeholders, "Times New Roman", font_size, option)
             st.success(f"{option} Document Generated Successfully!")
-            
+
             with open(updated_path, "rb") as file:
                 st.download_button(
                     label="Download Document (Word)",
@@ -121,18 +107,10 @@ def generate_document(option):
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     key="download_word"
                 )
-            
-            pdf_path = convert_docx_to_pdf(updated_path, pdf_output_path)
-            with open(pdf_path, "rb") as file:
-                st.download_button(
-                    label="Download Document (PDF)",
-                    data=file,
-                    file_name=pdf_file_name,
-                    mime="application/pdf",
-                    key="download_pdf"
-                )
+
         except Exception as e:
             st.error(f"An error occurred: {e}")
+            
 
 # Invoice Generator
 def format_price(amount, currency):

@@ -1,4 +1,4 @@
 streamlit
 python-docx
+comtypes
 num2words
-pdf2docx
