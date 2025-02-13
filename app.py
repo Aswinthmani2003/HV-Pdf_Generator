@@ -8,8 +8,6 @@ from docx.shared import Pt
 from docx.oxml.ns import qn
 from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
 import tempfile
-from docx.oxml import parse_xml
-from docx.oxml.ns import nsdecls
 from num2words import num2words
 
 # Common Functions
