@@ -56,8 +56,31 @@ def edit_word_template(template_path, output_path, placeholders, font_name, font
     except Exception as e:
         raise Exception(f"Error editing Word template: {e}")
 
+def apply_image_placeholder(doc, placeholder_key, image_file):
+    """Replace a placeholder with an image in the Word document."""
+    try:
+        for table in doc.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    for para in cell.paragraphs:
+                        if placeholder_key in para.text:
+                            para.text = ""
+                            run = para.add_run()
+                            run.add_picture(image_file, width=Inches(1.5), height=Inches(0.75))
+                            return doc
+        for para in doc.paragraphs:
+            if placeholder_key in para.text:
+                para.text = ""
+                run = para.add_run()
+                run.add_picture(image_file, width=Inches(1.2), height=Inches(0.10))
+                return doc
+        raise ValueError(f"Placeholder '{placeholder_key}' not found in the document.")
+    except Exception as e:
+        raise Exception(f"Error inserting image: {e}")
 
 # Contract/NDA Generator
+from docx.shared import Inches  # Add this import at the top of your script
+
 def generate_document(option):
     """Streamlit UI for generating NDA or Contract documents."""
     st.title("Document Generator")
@@ -72,6 +95,9 @@ def generate_document(option):
     company_name = st.text_input("Enter Company Name:")
     address = st.text_area("Enter Address:")
     date_field = st.date_input("Enter Date:", datetime.today())
+
+    # Add an input field for uploading an e-signature image
+    signature_file = st.file_uploader("Upload E-Signature (PNG or JPEG)", type=["png", "jpg", "jpeg"])
 
     placeholders = {
         "<< Client Name >>": client_name,
@@ -95,10 +121,27 @@ def generate_document(option):
 
         try:
             font_size = 11 if option == "NDA" else 12
-            updated_path = edit_word_template(template_paths[option], output_path, placeholders, "Times New Roman", font_size, option)
+            doc = Document(template_paths[option])
+
+            # Replace placeholders in the document
+            replace_and_format(doc, placeholders, "Times New Roman", font_size, option)
+
+            # Replace <<Signature>> placeholder with the uploaded e-signature image
+            if signature_file:
+                # Save the uploaded signature to a temporary file
+                signature_path = os.path.join(temp_dir, "signature.png")
+                with open(signature_path, "wb") as f:
+                    f.write(signature_file.getbuffer())
+
+                # Use the apply_image_placeholder function to insert the signature
+                doc = apply_image_placeholder(doc, "<<Signature>>", signature_path)
+
+            # Save the updated document
+            doc.save(output_path)
             st.success(f"{option} Document Generated Successfully!")
 
-            with open(updated_path, "rb") as file:
+            # Provide download link for the generated document
+            with open(output_path, "rb") as file:
                 st.download_button(
                     label="Download Document (Word)",
                     data=file,
@@ -109,7 +152,7 @@ def generate_document(option):
 
         except Exception as e:
             st.error(f"An error occurred: {e}")
-            
+
 
 # Invoice Generator
 def format_price(amount, currency):
@@ -179,36 +222,97 @@ def edit_invoice_template(template_name, output_path, placeholders):
         raise Exception(f"Error editing invoice template: {e}")
 
 def generate_invoice():
+    """Retrieve and update the next invoice number dynamically."""
+    counter_file = "invoice_counter.txt"
+
+    # Check if the file exists; if not, initialize it
+    if not os.path.exists(counter_file):
+        with open(counter_file, "w") as file:
+            file.write("1")
+
+    # Read the last invoice number
+    with open(counter_file, "r") as file:
+        last_number = int(file.read().strip())
+
+    # Increment and update the file
+    next_number = last_number + 1
+    with open(counter_file, "w") as file:
+        file.write(str(next_number))
+
+    # Format invoice number (e.g., 001, 002, 003)
+    return f"{next_number:03d}"
+
+# Function to format prices based on the region
+def format_price(amount, region):
+    """Format price based on the region (INR or USD)."""
+    return f"₹{amount:.2f}" if region == "INR" else f"${amount:.2f}"
+
+# Function to convert numbers to words (placeholder function)
+def amount_to_words(amount):
+    """Convert amount to words (can integrate a library like num2words)."""
+    return f"{amount} Rupees" if amount < 100000 else f"{amount} Dollars"
+
+# Function to edit the invoice template
+from docx import Document
+
+def edit_invoice_template(template_path, output_path, placeholders):
+    """Replace placeholders in the Word document template."""
+    try:
+        doc = Document(template_path)
+
+        # Replace text in paragraphs
+        for para in doc.paragraphs:
+            for key, value in placeholders.items():
+                if key in para.text:
+                    para.text = para.text.replace(key, value)
+
+        # Replace text inside tables (for placeholders in table cells)
+        for table in doc.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    for key, value in placeholders.items():
+                        if key in cell.text:
+                            cell.text = cell.text.replace(key, value)
+
+        # Save the modified document
+        doc.save(output_path)
+        return True
+    except Exception as e:
+        print(f"Error processing invoice: {e}")
+        return False
+
+
+# Streamlit App
+def generate_invoice():
     """Streamlit app for generating invoices."""
     st.title("Invoice Generator")
-    
-    # Region selection
-    region = st.selectbox("Region", ["INR", "USD"])
-    
-    # Dynamic Payment Options based on Region
-    if region == "INR":
-        payment_options = ["1 Payment", "3 EMI", "5 EMI"]
-    elif region == "USD":
-        payment_options = ["3 EMI", "5 EMI"]
-    
-    # Input fields
+
+    # Select region
+    region = st.selectbox("Select Region", ["INR", "USD"])
+
+    # Set payment options dynamically
+    payment_options = ["1 Payment", "3 EMI", "5 EMI"] if region == "INR" else ["3 EMI", "5 EMI"]
+
+    # Input Fields
     client_name = st.text_input("Client Name")
     client_address = st.text_input("Client Address")
     project_name = st.text_input("Project Name")
     phone_number = st.text_input("Phone Number")
+    gst_number = st.text_input("GST Number")
     base_amount = st.number_input("Base Amount (excluding GST)", min_value=0.0, format="%.2f")
-    payment_option = st.selectbox("Payment Option", payment_options)  # Dynamic options
+    payment_option = st.selectbox("Payment Option", payment_options)
     invoice_date = st.date_input("Invoice Date", value=datetime.today())
     formatted_date = invoice_date.strftime("%d-%m-%Y")
 
     # Calculate GST and total amount
     gst_amount = round(base_amount * 0.18)
-    total_amount = base_amount + gst_amount  # Including GST
+    total_amount = base_amount + gst_amount
 
-    # Placeholders for the template
+    # Prepare placeholders for template
     placeholders = {
         "<<Client Name>>": client_name,
         "<<Client Address>>": client_address,
+        "<<GST Number>>": gst_number,
         "<<Client Email>>": client_address,
         "<<Project Name>>": project_name,
         "<<Mobile Number>>": phone_number,
@@ -216,7 +320,7 @@ def generate_invoice():
         "<<Amt to word>>": amount_to_words(int(total_amount)),
     }
 
-    # Logic for 1 Payment
+    # Select the correct template based on payment option
     if payment_option == "1 Payment":
         template_name = f"Invoice Template - {region} - 1 Payment 1.docx"
         placeholders.update({
@@ -225,8 +329,7 @@ def generate_invoice():
             "<<Price 3>>": format_price(total_amount, region),
             "<<Total 1>>": format_price(total_amount, region),
         })
-    
-    # Logic for 3 EMI
+
     elif payment_option == "3 EMI":
         template_name = f"Invoice Template - {region} - 3 EMI Payment Schedule 1.docx"
         p1 = round(total_amount * 0.30)
@@ -242,16 +345,14 @@ def generate_invoice():
             "<<Price 7>>": format_price(p2, region),
             "<<Price 8>>": format_price(p3, region),
         })
-    
-    # Logic for 5 EMI
+
     elif payment_option == "5 EMI":
         template_name = f"Invoice Template - {region} - 5 EMI Payment Schedule 1.docx"
-        p1 = round(total_amount * 0.20)  
-        p2 = round(total_amount * 0.20)  
-        p3 = round(total_amount * 0.20)  
-        p4 = round(total_amount * 0.20)  
-        p5 = total_amount - (p1 + p2 + p3 + p4)  
-
+        p1 = round(total_amount * 0.20)
+        p2 = round(total_amount * 0.20)
+        p3 = round(total_amount * 0.20)
+        p4 = round(total_amount * 0.20)
+        p5 = total_amount - (p1 + p2 + p3 + p4)
         placeholders.update({
             "<<Price 1>>": format_price(p1, region),
             "<<Price 2>>": format_price(p2, region),
@@ -263,34 +364,44 @@ def generate_invoice():
             "<<Price 8>>": format_price(p3, region),
             "<<Price 9>>": format_price(p4, region),
             "<<Price 10>>": format_price(p5, region),
-            "<<Total 1>>": format_price(total_amount, region),  
+            "<<Total 1>>": format_price(total_amount, region),
         })
 
-    # Generate Invoice button
+    # Generate Invoice Button
     if st.button("Generate Invoice"):
-        invoice_number = get_next_invoice_number()
-        placeholders["<<Invoice>>"] = str(invoice_number)
+        try:
+            # Generate the next invoice number
+            invoice_number = get_next_invoice_number()
+            placeholders["<<Invoice>>"] = str(invoice_number)
+            placeholders["<<Invoice No>>"] = str(invoice_number)
 
-        # Save the invoice to a temporary directory
-        temp_dir = tempfile.gettempdir()
-        sanitized_client_name = "".join([c if c.isalnum() or c.isspace() else "_" for c in client_name])
-        output_path = os.path.join(temp_dir, f"Invoice_{sanitized_client_name}_{formatted_date}.docx")
+            # Define the invoice template file path
+            template_path = os.path.join(os.getcwd(), template_name)
 
-        # Edit the template and save the invoice
-        success = edit_invoice_template(template_name, output_path, placeholders)
+            # Save the invoice to a temporary directory
+            temp_dir = tempfile.gettempdir()
+            sanitized_client_name = "".join([c if c.isalnum() or c.isspace() else "_" for c in client_name])
+            output_path = os.path.join(temp_dir, f"Invoice_{sanitized_client_name}_{invoice_number}.docx")
 
-        # Display success message and download button
-        if success and os.path.exists(output_path):
-            st.success(f"✅ Invoice #{invoice_number} generated successfully!")
-            with open(output_path, "rb") as file:
-                st.download_button(
-                    label="📥 Download Invoice",
-                    data=file,
-                    file_name=f"Invoice_{sanitized_client_name}_{formatted_date}.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                )
-        else:
-            st.error(f"❌ Invoice generation failed.")
+            # Edit the template and save the invoice
+            success = edit_invoice_template(template_path, output_path, placeholders)
+
+            # Show success message and provide download link
+            if success and os.path.exists(output_path):
+                st.success(f"✅ Invoice #{invoice_number} generated successfully!")
+                with open(output_path, "rb") as file:
+                    st.download_button(
+                        label="📥 Download Invoice",
+                        data=file,
+                        file_name=f"Invoice_{sanitized_client_name}_{invoice_number}.docx",
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    )
+            else:
+                st.error(f"❌ Invoice generation failed.")
+        except Exception as e:
+            st.error(f"An error occurred: {e}")
+
+
 
 # Main App
 def main():
